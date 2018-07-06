@@ -21,6 +21,7 @@
 
 import Foundation
 import Dispatch
+import Vapor
 
 public protocol ReswifcProcess {
 
@@ -124,37 +125,55 @@ extension Reswifc {
         public func process() {
 
             do {
-                let jobIDs = try self.queue.processingJobs()
+                _ = try self.queue.processingJobs().map(to: Void.self){
+                    jobIDs in
+                    
+                    print("[Reswifc.Monitor] Analyzing \(jobIDs.count) jobs in the processing queue.")
+                    
+                    var expired = 0
+                    var failed = 0
+                    var processing = 0
+                    
+                    for jobID in jobIDs {
+                        
+                        do {
+                            _ = try self.queue.retryAttempts(for: jobID).map(to: Void.self){
+                                retryAttempts in
+                                
+                                if retryAttempts > self.maxRetryAttempts {
+                                    print("[Reswifc.Monitor] Removing job from the processing queue: \(jobID)")
+                                    try self.queue.complete(jobID)
+                                    failed += 1
+                                  //  continue
+                                } else {
+                                    _ = try self.queue.retryJobIfExpired(jobID).map(to: Void.self){
+                                        response in
+                                        
+                                        if response {
+                                            print("[Reswifc.Monitor] Retry job: \(jobID)")
+                                            expired += 1
+                                        } else {
+                                            processing += 1
+                                        }
+                                        
+                                    }
 
-                print("[Reswifc.Monitor] Analyzing \(jobIDs.count) jobs in the processing queue.")
+                                }
+                               // return
 
-                var expired = 0
-                var failed = 0
-                var processing = 0
-
-                for jobID in jobIDs {
-
-                    do {
-                        guard try self.queue.retryAttempts(for: jobID) < self.maxRetryAttempts else {
-                            print("[Reswifc.Monitor] Removing job from the processing queue: \(jobID)")
-                            try self.queue.complete(jobID)
-                            failed += 1
-                            continue
+                            //    return Future.Void
+                            }
+                            
+                        } catch let error {
+                            print("[Reswifc.Monitor] Error while retrying job: \(error.localizedDescription)")
                         }
-
-                        if try self.queue.retryJobIfExpired(jobID) {
-                            print("[Reswifc.Monitor] Retry job: \(jobID)")
-                            expired += 1
-                        } else {
-                            processing += 1
-                        }
-
-                    } catch let error {
-                        print("[Reswifc.Monitor] Error while retrying job: \(error.localizedDescription)")
                     }
+                    
+                    print("[Reswifc.Monitor] Jobs analysis completed. Found \(processing) processing, \(expired) expired and \(failed) failed.")
+
+                    
                 }
 
-                print("[Reswifc.Monitor] Jobs analysis completed. Found \(processing) processing, \(expired) expired and \(failed) failed.")
                 
             } catch let error {
                 print("[Reswifc.Monitor] Error while retrieving processing jobs: \(error.localizedDescription)")
