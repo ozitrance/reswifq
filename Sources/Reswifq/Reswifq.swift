@@ -21,6 +21,7 @@
 
 import Foundation
 import RedisClient
+import Vapor
 
 public enum ReswifqError: Error {
     case unknownJobType(String)
@@ -29,6 +30,8 @@ public enum ReswifqError: Error {
 // MARK: - Reswifq
 
 public final class Reswifq: Queue {
+    
+    
 
     // MARK: Initialization
 
@@ -60,34 +63,36 @@ public final class Reswifq: Queue {
         }
     }
 
-    public func dequeue() throws -> PersistedJob? {
+    public func dequeue() throws -> Future<PersistedJob?> {
 
-        guard let encodedJob = try self.client.rpoplpush(
-            source: RedisKey(.queuePending(.medium)).value,
-            destination: RedisKey(.queueProcessing).value
-        ) else {
-            return nil
+        
+        return try self.client.rpoplpush(
+        source: RedisKey(.queuePending(.medium)).value,
+        destination: RedisKey(.queueProcessing).value
+            ).map(to: PersistedJob?.self){
+                encodedJob in
+                if let encodedJob = encodedJob {
+                    let persistedJob = try self.persistedJob(with: encodedJob)
+                    self.setLock(for: persistedJob)
+                    return persistedJob
+                }
+                return nil
         }
 
-        let persistedJob = try self.persistedJob(with: encodedJob)
-
-        self.setLock(for: persistedJob)
-
-        return persistedJob
     }
 
-    public func bdequeue() throws -> PersistedJob {
+    public func bdequeue() throws -> Future<PersistedJob> {
 
-        let encodedJob = try self.client.brpoplpush(
+        return try self.client.brpoplpush(
             source: RedisKey(.queuePending(.medium)).value,
             destination: RedisKey(.queueProcessing).value
-        )
+            ).map(to: PersistedJob.self){
+                encodedJob in
 
-        let persistedJob = try self.persistedJob(with: encodedJob)
-
-        self.setLock(for: persistedJob)
-
-        return persistedJob
+            let persistedJob = try self.persistedJob(with: encodedJob)
+            self.setLock(for: persistedJob)
+            return persistedJob
+        }
     }
 
     public func complete(_ identifier: JobID) throws {
@@ -121,7 +126,7 @@ extension Reswifq {
 
      - returns: An array of persisted jobs that have been enqueued and are waiting to be processed.
      */
-    public func pendingJobs() throws -> [JobID] {
+    public func pendingJobs() throws -> Future<[JobID]> {
 
         return try self.client.lrange(RedisKey(.queuePending(.medium)).value, start: 0, stop: -1)
     }
@@ -131,7 +136,7 @@ extension Reswifq {
 
      - returns: An array of persisted jobs that have been dequeued and are being processed.
      */
-    public func processingJobs() throws -> [JobID] {
+    public func processingJobs() throws -> Future<[JobID]> {
 
         return try self.client.lrange(RedisKey(.queueProcessing).value, start: 0, stop: -1)
     }
@@ -141,7 +146,7 @@ extension Reswifq {
 
      - returns: An array of persisted jobs that have been scheduled for delayed execution.
      */
-    public func delayedJobs() throws -> [JobID] {
+    public func delayedJobs() throws -> Future<[JobID]> {
 
         return try self.client.zrange(RedisKey(.queueDelayed).value, start: 0, stop: -1)
     }
@@ -151,32 +156,37 @@ extension Reswifq {
 
      - returns: An array of persisted jobs that have been scheduled for delayed execution and are now overdue.
      */
-    public func overdueJobs() throws -> [JobID] {
+    public func overdueJobs() throws -> Future<[JobID]> {
 
         return try self.client.zrangebyscore(RedisKey(.queueDelayed).value, min: 0, max: Date().timeIntervalSince1970)
     }
 
     public func enqueueOverdueJobs() throws {
 
-        let overdueJobs = try self.overdueJobs()
-
-        for job in overdueJobs {
-
-            try self.client.multi { client, transaction in
-
-                try transaction.enqueue {
-                    // Remove the job from the delayed queue
-                    try client.zrem(RedisKey(.queueDelayed).value, member: job)
-                }
-
-                try transaction.enqueue {
-                    // Add the job to the pending queue
-                    // This is not ideal because subsequent delayed jobs would be executed in reverse order,
-                    // but this is the best solution, until we can support queues with different priorities
-                    try client.rpush(RedisKey(.queuePending(.medium)).value, values: job)
+        _ = try self.overdueJobs().map(to: Void.self){
+            overdueJobs in
+           
+            for job in overdueJobs {
+                
+                try self.client.multi { client, transaction in
+                    
+                    try transaction.enqueue {
+                        // Remove the job from the delayed queue
+                        try client.zrem(RedisKey(.queueDelayed).value, member: job)
+                    }
+                    
+                    try transaction.enqueue {
+                        // Add the job to the pending queue
+                        // This is not ideal because subsequent delayed jobs would be executed in reverse order,
+                        // but this is the best solution, until we can support queues with different priorities
+                        try client.rpush(RedisKey(.queuePending(.medium)).value, values: job)
+                    }
                 }
             }
+
+            
         }
+
     }
 
     /**
@@ -184,9 +194,12 @@ extension Reswifq {
      
      - returns: `true` if the job has expired, `false` otherwise.
      */
-    public func isJobExpired(_ identifier: JobID) throws -> Bool {
+    public func isJobExpired(_ identifier: JobID) throws -> Future<Bool> {
 
-        return try self.client.get(RedisKey(.lock(identifier)).value) == nil
+        return try self.client.get(RedisKey(.lock(identifier)).value).map(to: Bool.self){
+            response in
+            return response == nil
+            }
     }
 
     /**
@@ -196,13 +209,17 @@ extension Reswifq {
      
      - returns: The number of retry attempts for the given jobs.
      */
-    public func retryAttempts(for identifier: JobID) throws -> Int64 {
+    public func retryAttempts(for identifier: JobID) throws -> Future<Int64> {
 
-        guard let attempts = try self.client.get(RedisKey(.retry(identifier)).value) else {
-            return 0
+        return try self.client.get(RedisKey(.retry(identifier)).value).map(to: Int64.self){
+            attempts in
+            
+            if let attempts = attempts {
+                return Int64(attempts) ?? 0
+            } else {
+                return 0
+            }
         }
-
-        return Int64(attempts) ?? 0
     }
 
     /**
@@ -215,32 +232,39 @@ extension Reswifq {
      - returns: `true` if an retry attempt has been made, `false` otherwise.
      */
     @discardableResult
-    public func retryJobIfExpired(_ identifier: JobID) throws -> Bool {
-
-        guard try self.isJobExpired(identifier) else {
-            return false
-        }
-
-        try self.client.multi { client, transaction in
-
-            try transaction.enqueue {
-                // Remove the job from the processing queue
-                try client.lrem(RedisKey(.queueProcessing).value, value: identifier, count: -1)
+    public func retryJobIfExpired(_ identifier: JobID) throws -> Future<Bool> {
+        
+        return try self.isJobExpired(identifier).map(to: Bool.self){
+            response in
+            
+            if response == false {
+                return false
             }
 
-            try transaction.enqueue {
-                // Add the job to the pending queue
-                try client.lpush(RedisKey(.queuePending(.medium)).value, values: identifier)
-            }
+            try self.client.multi { client, transaction in
 
-            try transaction.enqueue {
-                // Increment the job's retry attempts
-                try client.incr(RedisKey(.retry(identifier)).value)
+                try transaction.enqueue {
+                    // Remove the job from the processing queue
+                    try client.lrem(RedisKey(.queueProcessing).value, value: identifier, count: -1)
+                }
+
+                try transaction.enqueue {
+                    // Add the job to the pending queue
+                    try client.lpush(RedisKey(.queuePending(.medium)).value, values: identifier)
+                }
+
+                try transaction.enqueue {
+                    // Increment the job's retry attempts
+                    try client.incr(RedisKey(.retry(identifier)).value)
+                }
             }
+        
+            return true
         }
         
-        return true
     }
+    
+    
 }
 
 // MARK: - Queue Helpers
