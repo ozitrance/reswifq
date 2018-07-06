@@ -21,6 +21,7 @@
 
 import Foundation
 import Dispatch
+import Vapor
 
 enum MemQueueError: Error {
     case dataIntegrityFailure
@@ -30,7 +31,7 @@ enum MemQueueError: Error {
  Simple, thread safe, in memory queue.
  It doesn't implement the Reliable Queue Pattern.
  */
-public class MemQueue: Queue {
+public class MemQueue {
 
     // MARK: Setting and Getting Attributes
 
@@ -129,35 +130,71 @@ public class MemQueue: Queue {
             return nil
         }
     }
+    /*
+    public func dequeue() throws -> Future<PersistedJob?> {
 
-    public func dequeue() throws -> PersistedJob? {
-
+        
+        /*
         return try self.queue.sync {
+            
+            if let jobID = self._dequeue()  {
+            
+                
+                guard let jobBox = self.jobs[jobID] else {
+                    throw MemQueueError.dataIntegrityFailure
+                }
 
+             //   return (identifier: jobID, job: jobBox.job)
+            //    return (identifier: jobID, job: jobBox.job)
+            }
+        }
+         */
+    }
+*/
+    public func dequeueNoFuture() throws -> PersistedJob? {
+        
+        
+        
+        return try self.queue.sync {
+            
             guard let jobID = self._dequeue() else {
                 return nil
             }
-
+            
             guard let jobBox = self.jobs[jobID] else {
                 throw MemQueueError.dataIntegrityFailure
             }
-
+            
             return (identifier: jobID, job: jobBox.job)
         }
     }
 
-    public func bdequeue() throws -> PersistedJob {
-
+    public func bdequeueNoFuture() throws -> PersistedJob {
+        
         while true {
-
-            guard let job = try self.dequeue() else {
+            
+            guard let job = try self.dequeueNoFuture() else {
                 continue
             }
-
+            
             return job
         }
     }
+/*
+    public func bdequeue() throws -> Future<PersistedJob> {
 
+        while true {
+            return try self.dequeue().map(to: PersistedJob.self){
+                job in
+                
+                return job!
+                if let job = job {
+                    return job
+                }
+            }
+        }
+    }
+*/
     public func complete(_ job: JobID) throws {
         self.queue.async {
             self.jobs[job] = nil
