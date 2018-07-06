@@ -113,15 +113,27 @@ public class Worker {
             defer { completion?() }
 
             do {
-                guard let persistedJob = self.averagePollingInterval == 0
-                    ? try self.queue.bdequeue()
-                    : try self.queue.dequeue()
-                    else {
-                        return // Nothing to process
-                }
+                
+                if self.averagePollingInterval == 0 {
+                    _ = try self.queue.bdequeue().map(to: Void.self){
+                        persistedJob in
+                        try persistedJob.job.perform()
+                        try self.queue.complete(persistedJob.identifier)
 
-                try persistedJob.job.perform()
-                try self.queue.complete(persistedJob.identifier)
+                    }
+                } else {
+                    _ = try self.queue.dequeue().map(to: Void.self){
+                        persistedJob in
+                        if let persistedJob = persistedJob {
+                            try persistedJob.job.perform()
+                            try self.queue.complete(persistedJob.identifier)
+                        }
+                        
+                    }
+                }
+                
+                return
+
 
             } catch let error {
                 // Log the error
