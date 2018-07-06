@@ -29,7 +29,7 @@ let package = Package(
 		.library(name: "Reswifq", targets: ["Reswifq"])
 	],
 	dependencies: [
-		.package(url: "https://github.com/ozitrance/redis-client.git", .branch("vapor3")),
+		.package(url: "git@github.com:ozitrance/redis-client.git", .branch("vapor3")),
 		.package(url: "https://github.com/vapor/vapor.git", .upToNextMajor(from: "3.0.0-rc")),
 
 	],
