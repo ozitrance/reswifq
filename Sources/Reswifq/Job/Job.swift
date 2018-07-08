@@ -20,6 +20,7 @@
 //
 
 import Foundation
+import Vapor
 
 public protocol Job: DataEncodable, DataDecodable {
 
@@ -55,7 +56,7 @@ public protocol Job: DataEncodable, DataDecodable {
      A worker execute the job calling this method.
      Throw an error to indicate that the job failed.
      */
-    func perform() throws
+    func perform() throws -> Future<Void>
 }
 
 public extension Job {
