@@ -63,20 +63,20 @@ public final class Reswifq: Queue {
         }
     }
 
-    public func dequeue() throws -> Future<PersistedJob?> {
+    public func dequeue() throws -> Future<PersistedJob> {
 
         
         return try self.client.rpoplpush(
-        source: RedisKey(.queuePending(.medium)).value,
-        destination: RedisKey(.queueProcessing).value
-            ).map(to: PersistedJob?.self){
+            source: RedisKey(.queuePending(.medium)).value,
+            destination: RedisKey(.queueProcessing).value
+            ).flatMap(to: PersistedJob.self){
                 encodedJob in
-                if let encodedJob = encodedJob {
-                    let persistedJob = try self.persistedJob(with: encodedJob)
-                    self.setLock(for: persistedJob)
+                
+                let persistedJob = try self.persistedJob(with: encodedJob)
+                return try self.setLock(for: persistedJob).map(to: PersistedJob.self){
+                    response in
                     return persistedJob
                 }
-                return nil
         }
 
     }
@@ -86,34 +86,76 @@ public final class Reswifq: Queue {
         return try self.client.brpoplpush(
             source: RedisKey(.queuePending(.medium)).value,
             destination: RedisKey(.queueProcessing).value
-            ).map(to: PersistedJob.self){
+            ).flatMap(to: PersistedJob.self){
                 encodedJob in
 
             let persistedJob = try self.persistedJob(with: encodedJob)
-            self.setLock(for: persistedJob)
-            return persistedJob
+                return try self.setLock(for: persistedJob).map(to: PersistedJob.self){
+                    response in
+                    return persistedJob
+                }
         }
     }
 
-    public func complete(_ identifier: JobID) throws {
+    public func complete(_ identifier: JobID) throws -> Future<Void> {
 
-        try self.client.multi { client, transaction in
-
-            try transaction.enqueue {
+        return try self.client.multi().flatMap(to: Void.self){
+            (client, transaction, mainResponse) in
+            print("Back from multi. client: \(client), transaction:\(transaction), response:\(mainResponse)")
+            
+            
+            do {
+                print("Trying: Remove the job from the processing queue")
                 // Remove the job from the processing queue
-                try client.lrem(RedisKey(.queueProcessing).value, value: identifier, count: -1)
-            }
 
-            try transaction.enqueue {
-                // Remove the lock
-                try client.del(RedisKey(.lock(identifier)).value)
-            }
+                return try client.lrem(RedisKey(.queueProcessing).value, value: identifier, count: -1).flatMap(to: Void.self){
+                    response in
+                    print("Trying: Remove the lock")
+                    
+                    // Remove the lock
 
-            try transaction.enqueue {
-                // Remove any retry attempt
-                try client.del(RedisKey(.retry(identifier)).value)
+                    return try client.del(RedisKey(.lock(identifier)).value).flatMap(to: Void.self) {
+                        response in
+                        
+                        print("Trying: Remove any retry attempt")
+                        
+                        // Remove any retry attempt
+                        return try client.del(RedisKey(.retry(identifier)).value).flatMap(to: Void.self){
+                            reponse in
+                            
+                            return try client.execute("EXEC", arguments: nil).map(to: Void.self){
+                                execResponse in
+                                
+                                guard let result = execResponse.array else {
+                                    throw RedisClientError.invalidResponse(mainResponse)
+                                }
+                                
+                                //  return result
+                            }
+
+                            
+                        }
+                    }
+                    throw RedisClientError.enqueueCommandError
+
+                }
+                 
+            }  catch RedisClientError.invalidResponse(let response) {
+                guard response.status == .queued else {
+                    throw RedisClientError.invalidResponse(response)
+                }
+            } catch {
+                _ = try client.execute("DISCARD", arguments: nil).map(to: Void.self){
+                    response in
+                    throw RedisClientError.transactionAborted
+                    
+                }
             }
+            let app = try Application()
+            return app.future()
+
         }
+        
     }
 }
 
@@ -168,8 +210,9 @@ extension Reswifq {
            
             for job in overdueJobs {
                 
-                try self.client.multi { client, transaction in
-                    
+                _ = try self.client.multi().map(to: Void.self){
+                    (client, transaction, response) in
+                   
                     try transaction.enqueue {
                         // Remove the job from the delayed queue
                         try client.zrem(RedisKey(.queueDelayed).value, member: job)
@@ -181,6 +224,8 @@ extension Reswifq {
                         // but this is the best solution, until we can support queues with different priorities
                         try client.rpush(RedisKey(.queuePending(.medium)).value, values: job)
                     }
+                    
+                    
                 }
             }
 
@@ -234,32 +279,47 @@ extension Reswifq {
     @discardableResult
     public func retryJobIfExpired(_ identifier: JobID) throws -> Future<Bool> {
         
-        return try self.isJobExpired(identifier).map(to: Bool.self){
+        return try self.isJobExpired(identifier).flatMap(to: Bool.self){
             response in
             
-            if response == false {
-                return false
+            guard response != false else {
+                let app = try Application()
+                return app.future(false)
             }
-
-            try self.client.multi { client, transaction in
-
+            return try self.client.multi().flatMap(to: Bool.self){
+                (client, transaction, response) in
+                
                 try transaction.enqueue {
                     // Remove the job from the processing queue
-                    try client.lrem(RedisKey(.queueProcessing).value, value: identifier, count: -1)
+                    return try client.lrem(RedisKey(.queueProcessing).value, value: identifier, count: -1).map(to: Bool.self){
+                        _ in
+                        return true
+                    }
                 }
-
+                
                 try transaction.enqueue {
                     // Add the job to the pending queue
-                    try client.lpush(RedisKey(.queuePending(.medium)).value, values: identifier)
+                    return try client.lpush(RedisKey(.queuePending(.medium)).value, values: identifier).map(to: Bool.self){
+                        _ in
+                        return true
+                    }
                 }
-
+                
                 try transaction.enqueue {
                     // Increment the job's retry attempts
-                    try client.incr(RedisKey(.retry(identifier)).value)
+                    return try client.incr(RedisKey(.retry(identifier)).value).map(to: Bool.self){
+                        _ in
+                        return true
+                    }
                 }
+                
+                
+                let app = try Application()
+                return app.future(false)
+
+                
             }
-        
-            return true
+          //  return true
         }
         
     }
@@ -284,13 +344,18 @@ extension Reswifq {
         return (identifier: encodedJob, job: job)
     }
 
-    fileprivate func setLock(for persistedJob: PersistedJob) {
+    fileprivate func setLock(for persistedJob: PersistedJob) throws -> Future<Void> {
 
-        try? self.client.setex(
+        return try self.client.setex(
             RedisKey(.lock(persistedJob.identifier)).value,
             timeout: persistedJob.job.timeToLive,
             value: persistedJob.identifier
-        )
+            ).map(to: Void.self){
+                result in
+                
+                
+                
+        }
     }
 }
 
