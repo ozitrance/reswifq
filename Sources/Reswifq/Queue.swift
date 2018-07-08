@@ -20,6 +20,7 @@
 //
 
 import Foundation
+import Vapor
 
 public typealias JobID = String
 
@@ -30,12 +31,12 @@ public protocol Queue {
     func enqueue(_ job: Job, priority: QueuePriority, scheduleAt: Date?) throws
 
     /// Returns the next Job to execute, or `nil` if the queue is empty.
-    func dequeue() throws -> PersistedJob?
+    func dequeue() throws -> Future<PersistedJob>
 
     /// Must block the execution until a Job is available.
-    func bdequeue() throws -> PersistedJob
+    func bdequeue() throws -> Future<PersistedJob>
 
-    func complete(_ job: JobID) throws
+    func complete(_ job: JobID) throws -> Future<Void>
 }
 
 public enum QueuePriority: String {
