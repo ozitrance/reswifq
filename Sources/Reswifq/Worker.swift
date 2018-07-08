@@ -21,6 +21,8 @@
 
 import Foundation
 import Dispatch
+import Vapor
+//import RedisClient
 
 public class Worker {
 
@@ -67,31 +69,77 @@ public class Worker {
     /**
      Starts the worker processing and wait indefinitely.
      */
-    public func run() {
+    public func run() throws {
+        self.isCancelled = false
 
+         //   guard self.semaphore.wait(timeout: .distantFuture) == .success else {
+         //      throw Abort(.badRequest) // Not sure if this can ever happen when using distantFuture
+        //    }
+   //     while !self.isCancelled {
+
+    //    group.enter()
+
+            print("ThreadCheck - before workItem - \(Thread.current). Time is \(Date().rfc1123)")
+          //  sleep(5)
+            print("before workItem")
+
+            _ = try self.makeWorkItem().map(to: Void.self) {
+                print("ThreadCheck - after running workitem - \(Thread.current). Time is \(Date().rfc1123)")
+             //   sleep(5)
+
+               // print("after running workitem")
+                if self.averagePollingInterval > 0 {
+                    sleep(seconds: random(self.averagePollingInterval))
+                }
+              //  self.group.leave()
+
+             //   self.semaphore.signal()
+                try self.run()
+
+            }
+     //   }
+        /*
         self.isCancelled = false
 
         while !self.isCancelled {
 
-            guard self.semaphore.wait(timeout: .distantFuture) == .success else {
-                continue // Not sure if this can ever happen when using distantFuture
+
+       //     self.group.enter()
+
+            _ = try self.makeWorkItem().map(to: Void.self) {
+                
+                print("after running workitem")
+                if self.averagePollingInterval > 0 {
+                    sleep(seconds: random(self.averagePollingInterval))
+                }
+            //    self.isCancelled = false
+
+             //   self.semaphore.signal()
+                
+                //        self.group.leave()
+
             }
+            
+        //    guard self.semaphore.wait(timeout: .distantFuture) == .success else {
+         //       continue // Not sure if this can ever happen when using distantFuture
+        //    }
 
-            self.group.enter()
+            /*
+            let workItem = try self.makeWorkItem {
 
-            let workItem = self.makeWorkItem {
-
+                print("after running workitem")
                 if self.averagePollingInterval > 0 {
                     sleep(seconds: random(self.averagePollingInterval))
                 }
 
-                self.semaphore.signal()
+          //      self.semaphore.signal()
 
-                self.group.leave()
+        //        self.group.leave()
             }
-
-            self.dispatchQueue.async(execute: workItem)
-        }
+            */
+         //   print("About to run \(workItem)")
+      //      self.dispatchQueue.async(execute: workItem)
+        }*/
     }
 
     /**
@@ -102,43 +150,48 @@ public class Worker {
         self.isCancelled = true
 
         if waitUntilAllJobsAreFinished {
-            self.group.wait()
+            print("Need to waitUntilAllJobsAreFinished")
+        //    self.group.wait()
         }
     }
+    /*
+    public func complete(_ job: JobID) throws {
+        self.dispatchQueue.async {
+            self.jobs[job] = nil
+        }
+    }
+    */
+    
+    private func makeBDequeueWorkItem() throws -> Future<Void> {
 
-    private func makeWorkItem(_ completion: (() -> Void)? = nil) -> DispatchWorkItem {
-
-        return DispatchWorkItem(block: {
-
-            defer { completion?() }
-
-            do {
-                
-                if self.averagePollingInterval == 0 {
-                    _ = try self.queue.bdequeue().map(to: Void.self){
-                        persistedJob in
-                        try persistedJob.job.perform()
-                        try self.queue.complete(persistedJob.identifier)
-
-                    }
-                } else {
-                    _ = try self.queue.dequeue().map(to: Void.self){
-                        persistedJob in
-                        if let persistedJob = persistedJob {
-                            try persistedJob.job.perform()
-                            try self.queue.complete(persistedJob.identifier)
-                        }
-                        
-                    }
-                }
-                
-                return
-
-
-            } catch let error {
-                // Log the error
-                print("Error: \(error.localizedDescription)")
+     //   let app = try Application()
+        return try self.queue.bdequeue().flatMap(to: Void.self){
+            persistedJob in
+            return try persistedJob.job.perform().flatMap(to: Void.self) {
+                return try self.queue.complete(persistedJob.identifier).map(to: Void.self){}
             }
-        })
+            
+        }
+    }
+    
+    private func makeDequeueWorkItem() throws -> Future<Void> {
+        
+        return try self.queue.dequeue().flatMap(to: Void.self){
+            persistedJob in
+            print("IM BACK HEREEEEEEEE ")
+            
+            return try persistedJob.job.perform().flatMap(to: Void.self) {
+                print("Back From Performing!")
+                return try self.queue.complete(persistedJob.identifier).map(to: Void.self){
+                    
+                    print("Back From complete")
+                }
+            }
+        }
+    }
+    
+    private func makeWorkItem() throws -> Future<Void> {
+        let isPollingIntervalEqual = self.averagePollingInterval == 0
+        return isPollingIntervalEqual ? try makeBDequeueWorkItem() : try makeDequeueWorkItem()
     }
 }
