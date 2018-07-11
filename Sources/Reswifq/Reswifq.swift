@@ -49,17 +49,22 @@ public final class Reswifq: Queue {
 
     /// Priority not supported at the moment
     /// See https://github.com/antirez/redis/issues/1785
-    public func enqueue(_ job: Job, priority: QueuePriority = .medium, scheduleAt: Date? = nil) throws {
+    public func enqueue(_ job: Job, priority: QueuePriority = .medium, scheduleAt: Date? = nil) throws -> Future<Void> {
 
         let encodedJob = try JobBox(job, priority: priority).data().string(using: .utf8)
 
         if let scheduledAt = scheduleAt {
             // Delayed Job
-            try self.client.zadd(RedisKey(.queueDelayed).value, values: (score: scheduledAt.timeIntervalSince1970, member: encodedJob))
+            return try self.client.zadd(RedisKey(.queueDelayed).value, values: (score: scheduledAt.timeIntervalSince1970, member: encodedJob)).map(to: Void.self) {
+                result in
+                return
+            }
         } else {
             // Normal Job
-            //try self.client.lpush(RedisKey(.queuePending(priority)).value, values: encodedJob)
-            try self.client.lpush(RedisKey(.queuePending(.medium)).value, values: encodedJob)
+            return try self.client.lpush(RedisKey(.queuePending(.medium)).value, values: encodedJob).map(to: Void.self) {
+                result in
+                return
+            }
         }
     }
 
@@ -122,22 +127,19 @@ public final class Reswifq: Queue {
                         // Remove any retry attempt
                         return try client.del(RedisKey(.retry(identifier)).value).flatMap(to: Void.self){
                             reponse in
-                            
+                            print("Before Complete EXEC response is: \(reponse)")
+
                             return try client.execute("EXEC", arguments: nil).map(to: Void.self){
                                 execResponse in
-                                
-                                guard let result = execResponse.array else {
+                                print("Inside Complete EXEC response is: \(execResponse)")
+                                guard let _ = execResponse.array else {
                                     throw RedisClientError.invalidResponse(mainResponse)
                                 }
                                 
-                                //  return result
+                                return
                             }
-
-                            
                         }
                     }
-                    throw RedisClientError.enqueueCommandError
-
                 }
                  
             }  catch RedisClientError.invalidResponse(let response) {
