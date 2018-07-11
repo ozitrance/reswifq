@@ -167,8 +167,12 @@ public class Worker {
      //   let app = try Application()
         return try self.queue.bdequeue().flatMap(to: Void.self){
             persistedJob in
+
             return try persistedJob.job.perform().flatMap(to: Void.self) {
-                return try self.queue.complete(persistedJob.identifier).map(to: Void.self){}
+                return try self.queue.complete(persistedJob.identifier).map(to: Void.self){
+                    print("Inside makeBDequeueWorkItem After COMPLETE")
+                    return
+                }
             }
             
         }
@@ -178,13 +182,11 @@ public class Worker {
         
         return try self.queue.dequeue().flatMap(to: Void.self){
             persistedJob in
-            print("IM BACK HEREEEEEEEE ")
-            
+
             return try persistedJob.job.perform().flatMap(to: Void.self) {
-                print("Back From Performing!")
                 return try self.queue.complete(persistedJob.identifier).map(to: Void.self){
-                    
-                    print("Back From complete")
+                    print("Inside makeDequeueWorkItem After COMPLETE")
+                    return
                 }
             }
         }
@@ -192,6 +194,9 @@ public class Worker {
     
     private func makeWorkItem() throws -> Future<Void> {
         let isPollingIntervalEqual = self.averagePollingInterval == 0
-        return isPollingIntervalEqual ? try makeBDequeueWorkItem() : try makeDequeueWorkItem()
+        return (isPollingIntervalEqual ? try makeBDequeueWorkItem() :  try makeDequeueWorkItem()).map(to: Void.self){
+            print("Inside makeWorkItem After COMPLETE")
+            return
+        }
     }
 }
