@@ -56,7 +56,7 @@ public protocol Job: DataEncodable, DataDecodable {
      A worker execute the job calling this method.
      Throw an error to indicate that the job failed.
      */
-    func perform() throws -> Future<Void>
+    func perform(with req: Request) throws -> Future<Void>
 }
 
 public extension Job {
@@ -66,6 +66,6 @@ public extension Job {
     }
 
     public var timeToLive: TimeInterval {
-        return 3600.0 // 1 hour
+        return 60.0 // 1 hour
     }
 }
