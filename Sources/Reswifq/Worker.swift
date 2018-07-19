@@ -69,7 +69,7 @@ public class Worker {
     /**
      Starts the worker processing and wait indefinitely.
      */
-    public func run() throws {
+    public func run(with req: Request) throws {
         self.isCancelled = false
 
          //   guard self.semaphore.wait(timeout: .distantFuture) == .success else {
@@ -79,12 +79,13 @@ public class Worker {
 
     //    group.enter()
 
-            print("ThreadCheck - before workItem - \(Thread.current). Time is \(Date().rfc1123)")
+          //  print("ThreadCheck - before workItem - \(Thread.current). Time is \(Date().rfc1123)")
           //  sleep(5)
-            print("before workItem")
+         //   print("before workItem")
 
-            _ = try self.makeWorkItem().map(to: Void.self) {
-                print("ThreadCheck - after running workitem - \(Thread.current). Time is \(Date().rfc1123)")
+        do {
+            _ = try self.makeWorkItem(with: req).map(to: Void.self) {
+          //      print("ThreadCheck - after running workitem - \(Thread.current). Time is \(Date().rfc1123)")
              //   sleep(5)
 
                // print("after running workitem")
@@ -94,9 +95,14 @@ public class Worker {
               //  self.group.leave()
 
              //   self.semaphore.signal()
-                try self.run()
+                try self.run(with: req)
 
             }
+        }
+        catch let error as URLError {
+            print("URLError", error.code, error.localizedDescription, error.errorCode)
+        }
+        
      //   }
         /*
         self.isCancelled = false
@@ -162,15 +168,27 @@ public class Worker {
     }
     */
     
-    private func makeBDequeueWorkItem() throws -> Future<Void> {
+    private func makeBDequeueWorkItem(with req: Request) throws -> Future<Void> {
 
      //   let app = try Application()
         return try self.queue.bdequeue().flatMap(to: Void.self){
             persistedJob in
+            let job = try persistedJob.job.data()
+            let encoded = try? JSONSerialization.jsonObject(with: job) as? [String: Any] ?? [:]
+            
+            if let _ = encoded?["categoryPageData"] {
+               // print("skipping category")
+                return try self.makeBDequeueWorkItem(with: req)
+            } else if let _ = encoded?["productPageData"] {
+               // print("product: \(product)")
+                
+            } else {
+                print("encoded: \(encoded). job:\(job)")
+            }
 
-            return try persistedJob.job.perform().flatMap(to: Void.self) {
+            return try persistedJob.job.perform(with: req).flatMap(to: Void.self) {
                 return try self.queue.complete(persistedJob.identifier).map(to: Void.self){
-                    print("Inside makeBDequeueWorkItem After COMPLETE")
+                 //   print("Inside makeBDequeueWorkItem After COMPLETE")
                     return
                 }
             }
@@ -178,24 +196,35 @@ public class Worker {
         }
     }
     
-    private func makeDequeueWorkItem() throws -> Future<Void> {
+    private func makeDequeueWorkItem(with req: Request) throws -> Future<Void> {
         
         return try self.queue.dequeue().flatMap(to: Void.self){
             persistedJob in
+            let job = try persistedJob.job.data()
+            let encoded = try? JSONSerialization.jsonObject(with: job) as? [String: Any] ?? [:]
 
-            return try persistedJob.job.perform().flatMap(to: Void.self) {
+            if let _ = encoded?["categoryPageData"] {
+             //   print("skipping category)")
+                return try self.makeDequeueWorkItem(with: req)
+            } else if let _ = encoded?["productPageData"] {
+             //   print("product: \(product)")
+                
+            } else {
+                print("encoded: \(encoded). job:\(job)")
+            }
+            return try persistedJob.job.perform(with: req).flatMap(to: Void.self) {
                 return try self.queue.complete(persistedJob.identifier).map(to: Void.self){
-                    print("Inside makeDequeueWorkItem After COMPLETE")
+                  //  print("Inside makeDequeueWorkItem After COMPLETE")
                     return
                 }
             }
         }
     }
     
-    private func makeWorkItem() throws -> Future<Void> {
+    private func makeWorkItem(with req: Request) throws -> Future<Void> {
         let isPollingIntervalEqual = self.averagePollingInterval == 0
-        return (isPollingIntervalEqual ? try makeBDequeueWorkItem() :  try makeDequeueWorkItem()).map(to: Void.self){
-            print("Inside makeWorkItem After COMPLETE")
+        return (isPollingIntervalEqual ? try makeBDequeueWorkItem(with: req) :  try makeDequeueWorkItem(with: req)).map(to: Void.self){
+         //   print("Inside makeWorkItem After COMPLETE")
             return
         }
     }
