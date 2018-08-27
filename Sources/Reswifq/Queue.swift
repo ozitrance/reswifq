@@ -31,10 +31,10 @@ public protocol Queue {
     func enqueue(_ job: Job, priority: QueuePriority, scheduleAt: Date?) throws -> Future<Void>
 
     /// Returns the next Job to execute, or `nil` if the queue is empty.
-    func dequeue() throws -> Future<PersistedJob>
+    func dequeue(priority: QueuePriority) throws -> Future<PersistedJob>
 
     /// Must block the execution until a Job is available.
-    func bdequeue() throws -> Future<PersistedJob>
+    func bdequeue(priority: QueuePriority) throws -> Future<PersistedJob>
 
     func complete(_ job: JobID) throws -> Future<Void>
 }
