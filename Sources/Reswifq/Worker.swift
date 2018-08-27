@@ -71,24 +71,12 @@ public class Worker {
      */
     public func run(with req: Request) throws {
         self.isCancelled = false
-
-         //   guard self.semaphore.wait(timeout: .distantFuture) == .success else {
-         //      throw Abort(.badRequest) // Not sure if this can ever happen when using distantFuture
-        //    }
-   //     while !self.isCancelled {
-
-    //    group.enter()
-
-          //  print("ThreadCheck - before workItem - \(Thread.current). Time is \(Date().rfc1123)")
-          //  sleep(5)
-         //   print("before workItem")
-
-        do {
+        print("Starting run again")
             _ = try self.makeWorkItem(with: req).map(to: Void.self) {
           //      print("ThreadCheck - after running workitem - \(Thread.current). Time is \(Date().rfc1123)")
              //   sleep(5)
 
-               // print("after running workitem")
+                print("after running workitem")
                 if self.averagePollingInterval > 0 {
                     sleep(seconds: random(self.averagePollingInterval))
                 }
@@ -97,55 +85,11 @@ public class Worker {
              //   self.semaphore.signal()
                 try self.run(with: req)
 
-            }
-        }
-        catch let error as URLError {
-            print("URLError", error.code, error.localizedDescription, error.errorCode)
+                }.catchMap(){
+                    error in
+                    print("There was an erro in Worker.run(): \(error)")
         }
         
-     //   }
-        /*
-        self.isCancelled = false
-
-        while !self.isCancelled {
-
-
-       //     self.group.enter()
-
-            _ = try self.makeWorkItem().map(to: Void.self) {
-                
-                print("after running workitem")
-                if self.averagePollingInterval > 0 {
-                    sleep(seconds: random(self.averagePollingInterval))
-                }
-            //    self.isCancelled = false
-
-             //   self.semaphore.signal()
-                
-                //        self.group.leave()
-
-            }
-            
-        //    guard self.semaphore.wait(timeout: .distantFuture) == .success else {
-         //       continue // Not sure if this can ever happen when using distantFuture
-        //    }
-
-            /*
-            let workItem = try self.makeWorkItem {
-
-                print("after running workitem")
-                if self.averagePollingInterval > 0 {
-                    sleep(seconds: random(self.averagePollingInterval))
-                }
-
-          //      self.semaphore.signal()
-
-        //        self.group.leave()
-            }
-            */
-         //   print("About to run \(workItem)")
-      //      self.dispatchQueue.async(execute: workItem)
-        }*/
     }
 
     /**
@@ -168,53 +112,64 @@ public class Worker {
     }
     */
     
-    private func makeBDequeueWorkItem(with req: Request) throws -> Future<Void> {
-
-     //   let app = try Application()
-        return try self.queue.bdequeue().flatMap(to: Void.self){
+    private func makeBDequeueWorkItem(with req: Request, newPromise: Promise<Void>) throws -> Future<Void> {
+        print("Inside makeBDequeueWorkItem BEFORE")
+        let priority: QueuePriority = req.http.url.absoluteString.contains("/products") ? .high : .medium
+        
+        return try self.queue.bdequeue(priority: priority).flatMap(to: Void.self){
             persistedJob in
+            /*
             let job = try persistedJob.job.data()
             let encoded = try? JSONSerialization.jsonObject(with: job) as? [String: Any] ?? [:]
-            
+            print("Inside makeBDequeueWorkItem 2nd")
+
             if let _ = encoded?["categoryPageData"] {
-               // print("skipping category")
-                return try self.makeBDequeueWorkItem(with: req)
+                print("skipping category")
+                return try self.makeBDequeueWorkItem(with: req, newPromise: newPromise)
             } else if let _ = encoded?["productPageData"] {
                // print("product: \(product)")
                 
             } else {
                 print("encoded: \(encoded). job:\(job)")
             }
-
-            return try persistedJob.job.perform(with: req).flatMap(to: Void.self) {
-                return try self.queue.complete(persistedJob.identifier).map(to: Void.self){
-                 //   print("Inside makeBDequeueWorkItem After COMPLETE")
-                    return
+             */
+            _ = try persistedJob.job.perform(with: req).map(to: Void.self) {
+                _ = try self.queue.complete(persistedJob.identifier).map(to: Void.self){
+                    print("Inside makeBDequeueWorkItem After COMPLETE")
+                    newPromise.succeed()
+                  //  return
                 }
+            }
+            
+            return newPromise.futureResult.map(to: Void.self){
+                print("Inside newPromise After COMPLETE")
+
             }
             
         }
     }
     
     private func makeDequeueWorkItem(with req: Request) throws -> Future<Void> {
-        
-        return try self.queue.dequeue().flatMap(to: Void.self){
-            persistedJob in
-            let job = try persistedJob.job.data()
-            let encoded = try? JSONSerialization.jsonObject(with: job) as? [String: Any] ?? [:]
+        let priority = req.http.url.absoluteString.contains("/products") ? QueuePriority.high : QueuePriority.medium
 
+        return try self.queue.dequeue(priority: priority).flatMap(to: Void.self){
+            persistedJob in
+       //     let job = try persistedJob.job.data()
+        //    let encoded = try? JSONSerialization.jsonObject(with: job) as? [String: Any] ?? [:]
+            /*
             if let _ = encoded?["categoryPageData"] {
-             //   print("skipping category)")
+                print("skipping category)")
                 return try self.makeDequeueWorkItem(with: req)
             } else if let _ = encoded?["productPageData"] {
-             //   print("product: \(product)")
+              //  print("product: \(product)")
                 
             } else {
                 print("encoded: \(encoded). job:\(job)")
             }
+             */
             return try persistedJob.job.perform(with: req).flatMap(to: Void.self) {
                 return try self.queue.complete(persistedJob.identifier).map(to: Void.self){
-                  //  print("Inside makeDequeueWorkItem After COMPLETE")
+                    print("Inside makeDequeueWorkItem After COMPLETE")
                     return
                 }
             }
@@ -222,9 +177,11 @@ public class Worker {
     }
     
     private func makeWorkItem(with req: Request) throws -> Future<Void> {
-        let isPollingIntervalEqual = self.averagePollingInterval == 0
-        return (isPollingIntervalEqual ? try makeBDequeueWorkItem(with: req) :  try makeDequeueWorkItem(with: req)).map(to: Void.self){
-         //   print("Inside makeWorkItem After COMPLETE")
+        let isPollingIntervalEqual0 = self.averagePollingInterval == 0
+        let newPromise = req.eventLoop.newPromise(Void.self)
+        print("Inside makeWorkItem BEFORE")
+        return (isPollingIntervalEqual0 ? try makeBDequeueWorkItem(with: req, newPromise: newPromise) :  try makeDequeueWorkItem(with: req)).map(to: Void.self){
+            print("Inside makeWorkItem After COMPLETE")
             return
         }
     }
