@@ -63,8 +63,8 @@ public final class Reswifc {
          //   while !self.isCancelled {
             _ = try process.process(with: req).map(to: Void.self){
                 print("FINISHED PROCESS CYCLE")
-              //  sleep(process.interval)
-              //  try self.run(with: req)
+                sleep(process.interval)
+                try self.run(with: req)
             }
          //   }
 
@@ -189,6 +189,7 @@ extension Reswifc {
             let newPromise = req.eventLoop.newPromise(Void.self)
             _ = try self.queue.processingJobs().map(to: Void.self){
                 jobIDs in
+            //   print(jobIDs)
                 self.jobIDs = jobIDs
                 _ = try self.batchReQueue(with: self.queue, req: req, promise: newPromise)
             }
