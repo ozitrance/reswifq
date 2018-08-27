@@ -1,4 +1,4 @@
-//
+	//
 //  Reswifq.swift
 //  Reswifq
 //
@@ -51,6 +51,7 @@ public final class Reswifq: Queue {
     /// See https://github.com/antirez/redis/issues/1785
     public func enqueue(_ job: Job, priority: QueuePriority = .medium, scheduleAt: Date? = nil) throws -> Future<Void> {
 
+        print("BEFORE ENQUEING. PRIORITY: \(priority)")
         let encodedJob = try JobBox(job, priority: priority).data().string(using: .utf8)
 
         if let scheduledAt = scheduleAt {
@@ -61,21 +62,25 @@ public final class Reswifq: Queue {
             }
         } else {
             // Normal Job
-            return try self.client.lpush(RedisKey(.queuePending(.medium)).value, values: encodedJob).map(to: Void.self) {
+          //  print("before normal job in reswifq")
+            return try self.client.lpush(RedisKey(.queuePending(priority)).value, values: encodedJob).map(to: Void.self) {
                 result in
+                print("after normal job in reswifq")
+
                 return
             }
         }
     }
 
-    public func dequeue() throws -> Future<PersistedJob> {
+    public func dequeue(priority: QueuePriority) throws -> Future<PersistedJob> {
 
         
         return try self.client.rpoplpush(
-            source: RedisKey(.queuePending(.medium)).value,
+            source: RedisKey(.queuePending(priority)).value,
             destination: RedisKey(.queueProcessing).value
             ).flatMap(to: PersistedJob.self){
                 encodedJob in
+                print("encodedJob: \(encodedJob)")
                 
                 let persistedJob = try self.persistedJob(with: encodedJob)
                 return try self.setLock(for: persistedJob).map(to: PersistedJob.self){
@@ -86,13 +91,14 @@ public final class Reswifq: Queue {
 
     }
 
-    public func bdequeue() throws -> Future<PersistedJob> {
+    public func bdequeue(priority: QueuePriority) throws -> Future<PersistedJob> {
 
         return try self.client.brpoplpush(
-            source: RedisKey(.queuePending(.medium)).value,
+            source: RedisKey(.queuePending(priority)).value,
             destination: RedisKey(.queueProcessing).value
             ).flatMap(to: PersistedJob.self){
                 encodedJob in
+                print("encodedJob: \(encodedJob)")
 
             let persistedJob = try self.persistedJob(with: encodedJob)
                 return try self.setLock(for: persistedJob).map(to: PersistedJob.self){
@@ -172,7 +178,11 @@ extension Reswifq {
      */
     public func pendingJobs() throws -> Future<[JobID]> {
 
-        return try self.client.lrange(RedisKey(.queuePending(.medium)).value, start: 0, stop: -1)
+        return try self.client.lrange(RedisKey(.queuePending(.medium)).value, start: 0, stop: -1).map(to: [JobID].self) {
+            jobIds in
+            //     print("Im after lrange")
+            return jobIds
+        }
     }
 
     /**
@@ -182,9 +192,9 @@ extension Reswifq {
      */
     public func processingJobs() throws -> Future<[JobID]> {
       //  print("before lrange")
-        return try self.client.lrange(RedisKey(.queueProcessing).value, start: 0, stop: -1).map(to: [JobID].self) {
+        return try self.client.lrange(RedisKey(.queueProcessing).value, start: 0, stop: 500).map(to: [JobID].self) {
             jobIds in
-       //     print("Im after lrange")
+          //  print("Im after lrange. jobids: \(jobIds)")
             return jobIds
         }
     }
@@ -238,6 +248,7 @@ extension Reswifq {
                                 // Add the job to the pending queue
                                 // This is not ideal because subsequent delayed jobs would be executed in reverse order,
                                 // but this is the best solution, until we can support queues with different priorities
+                                
                                 _ = try client.rpush(RedisKey(.queuePending(.medium)).value, values: job).map(to: Void.self) {
                                     bACL in
                                //     print("bACL22 is: \(bACL)")
@@ -321,8 +332,10 @@ extension Reswifq {
                     _ = try client.lrem(RedisKey(.queueProcessing).value, value: identifier, count: -1).map(to: Void.self){
                         _ in
                     //    print("BEOFRE lpush retryJobIfExpired. RESULT: \(result)")
-
-                        _ = try client.lpush(RedisKey(.queuePending(.medium)).value, values: identifier).map(to: Void.self){
+                        let priority: QueuePriority = identifier.contains("productPageData") ? .high : .medium
+                      //  print("Priority: \(priority), jobID: \(identifier)")
+                        
+                        _ = try client.lpush(RedisKey(.queuePending(priority)).value, values: identifier).map(to: Void.self){
                             _ in
                         //    print("AFTER lpush retryJobIfExpired. RESULT: \(result)")
 
