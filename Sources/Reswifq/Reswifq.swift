@@ -332,7 +332,7 @@ extension Reswifq {
                     _ = try client.lrem(RedisKey(.queueProcessing).value, value: identifier, count: -1).map(to: Void.self){
                         _ in
                     //    print("BEOFRE lpush retryJobIfExpired. RESULT: \(result)")
-                        let priority: QueuePriority = identifier.contains("productPageData") || identifier.contains("asins") ? .high : .medium
+                        let priority: QueuePriority = identifier.contains("productPageData") || identifier.contains("asins") || identifier.contains("upcs") ? .high : .medium
                       //  print("Priority: \(priority), jobID: \(identifier)")
                         
                         _ = try client.lpush(RedisKey(.queuePending(priority)).value, values: identifier).map(to: Void.self){
