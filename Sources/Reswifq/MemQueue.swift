@@ -36,7 +36,7 @@ public class MemQueue {
     // MARK: Setting and Getting Attributes
 
     var isEmpty: Bool {
-        return self.pendingHigh.isEmpty && self.pendingMedium.isEmpty && self.pendingLow.isEmpty
+        return self.pendingHigh.isEmpty && self.pendingMedium.isEmpty && self.pendingLow.isEmpty && self.pendingCategories.isEmpty && self.pendingASINs.isEmpty && pendingUPCs.isEmpty
     }
 
     // MARK: Concurrency Management
@@ -54,6 +54,12 @@ public class MemQueue {
     private var pendingMedium = [JobID]()
 
     private var pendingLow = [JobID]()
+    
+    private var pendingCategories = [JobID]()
+    
+    private var pendingASINs = [JobID]()
+    
+    private var pendingUPCs = [JobID]()
 
     // MARK: Queue
 
@@ -72,6 +78,12 @@ public class MemQueue {
             queue(&self.pendingMedium)
         case (.low, false):
             queue(&self.pendingLow)
+        case (.categories, false):
+            queue(&self.pendingCategories)
+        case (.asins, false):
+            queue(&self.pendingASINs)
+        case (.upcs, false):
+            queue(&self.pendingUPCs)
         }
     }
 
@@ -125,7 +137,16 @@ public class MemQueue {
 
         } else if !self.pendingLow.isEmpty {
             return self.pendingLow.removeFirst()
-
+            
+        } else if !self.pendingCategories.isEmpty {
+            return self.pendingCategories.removeFirst()
+            
+        } else if !self.pendingASINs.isEmpty {
+            return self.pendingASINs.removeFirst()
+            
+        } else if !self.pendingUPCs.isEmpty {
+            return self.pendingUPCs.removeFirst()
+            
         } else {
             return nil
         }
