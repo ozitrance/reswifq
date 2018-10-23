@@ -44,4 +44,7 @@ public enum QueuePriority: String {
     case high = "high"
     case medium = "medium"
     case low = "low"
+    case categories = "categories"
+    case asins = "asins"
+    case upcs = "upcs"
 }
