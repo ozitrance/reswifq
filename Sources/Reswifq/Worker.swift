@@ -113,9 +113,18 @@ public class Worker {
     */
     
     private func makeBDequeueWorkItem(with req: Request, newPromise: Promise<Void>) throws -> Future<Void> {
-        print("Inside makeBDequeueWorkItem BEFORE")
-        let priority: QueuePriority = req.http.url.absoluteString.contains("/products") || req.http.url.absoluteString.contains("/asins") || req.http.url.absoluteString.contains("/upcs") ? .high : .medium
-        
+        print("Inside makeBDequeueWorkItem BEFORE. url is: \(req.http.url.absoluteString)")
+        var priority: QueuePriority = .medium
+        if req.http.url.absoluteString.contains("/categories") {
+            priority = .categories
+        } else if req.http.url.absoluteString.contains("/asins") {
+            priority = .asins
+        } else if req.http.url.absoluteString.contains("/upcs") {
+            priority = .upcs
+        }
+ //       let priority: QueuePriority = req.http.url.absoluteString.contains("/products") || req.http.url.absoluteString.contains("/asins") || req.http.url.absoluteString.contains("/upcs") ? .high : .medium
+        print("Inside makeBDequeueWorkItem BEFORE1. url is: \(req.http.url.absoluteString)")
+
         return try self.queue.bdequeue(priority: priority).flatMap(to: Void.self){
             persistedJob in
             /*
@@ -150,7 +159,15 @@ public class Worker {
     }
     
     private func makeDequeueWorkItem(with req: Request) throws -> Future<Void> {
-        let priority = req.http.url.absoluteString.contains("/products") || req.http.url.absoluteString.contains("/asins") || req.http.url.absoluteString.contains("/upcs") ? QueuePriority.high : QueuePriority.medium
+        var priority: QueuePriority = .medium
+        if req.http.url.absoluteString.contains("/categories") {
+            priority = .categories
+        } else if req.http.url.absoluteString.contains("/asins") {
+            priority = .asins
+        } else if req.http.url.absoluteString.contains("/upcs") {
+            priority = .upcs
+        }
+      //  let priority = req.http.url.absoluteString.contains("/products") || req.http.url.absoluteString.contains("/asins") || req.http.url.absoluteString.contains("/upcs") ? QueuePriority.high : QueuePriority.medium
 
         return try self.queue.dequeue(priority: priority).flatMap(to: Void.self){
             persistedJob in
