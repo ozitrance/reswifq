@@ -92,12 +92,11 @@ public final class Reswifq: Queue {
     }
 
     public func bdequeue(priority: QueuePriority) throws -> Future<PersistedJob> {
-
-        return try self.client.brpoplpush(
-            source: RedisKey(.queuePending(priority)).value,
-            destination: RedisKey(.queueProcessing).value
-            ).flatMap(to: PersistedJob.self){
+        print("QueuePriority is: \(priority.rawValue)")
+        return try self.client.brpoplpush(source: RedisKey(.queuePending(priority)).value, destination: RedisKey(.queueProcessing).value).flatMap(to: PersistedJob.self){
                 encodedJob in
+            print("inside bdequeue(priority: in reswifq")
+
                 print("encodedJob: \(encodedJob)")
 
             let persistedJob = try self.persistedJob(with: encodedJob)
@@ -332,7 +331,15 @@ extension Reswifq {
                     _ = try client.lrem(RedisKey(.queueProcessing).value, value: identifier, count: -1).map(to: Void.self){
                         _ in
                     //    print("BEOFRE lpush retryJobIfExpired. RESULT: \(result)")
-                        let priority: QueuePriority = identifier.contains("productPageData") || identifier.contains("asins") || identifier.contains("upcs") ? .high : .medium
+                        var priority: QueuePriority = .medium
+                        if identifier.contains("categories") {
+                            priority = .categories
+                        } else if identifier.contains("asins") {
+                            priority = .asins
+                        } else if identifier.contains("upcs") {
+                            priority = .upcs
+                        }
+                      //  let priority: QueuePriority = identifier.contains("productPageData") || identifier.contains("asins") || identifier.contains("upcs") ? .high : .medium
                       //  print("Priority: \(priority), jobID: \(identifier)")
                         
                         _ = try client.lpush(RedisKey(.queuePending(priority)).value, values: identifier).map(to: Void.self){
